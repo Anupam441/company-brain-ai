@@ -14,6 +14,11 @@ const workspaceMemberSchema = new mongoose.Schema({
     type: String,
     enum: ['admin', 'member'],
     default: 'member'
+  },
+  department: {
+    type: String,
+    enum: ['general', 'hr', 'engineering', 'sales', 'finance'],
+    default: 'general'
   }
 }, { timestamps: true });
 workspaceMemberSchema.index({ user: 1, workspace: 1 }, { unique: true });

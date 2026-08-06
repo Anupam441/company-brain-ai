@@ -34,6 +34,15 @@ const documentSchema = new mongoose.Schema({
   errorMessage: {
     type: String,
     default: null
+  },
+  visibility: {
+    type: String,
+    enum: ['public', 'restricted'],
+    default: 'public'
+  },
+  allowedDepartments: {
+    type: [String],
+    default: []
   }
 }, { timestamps: true });
 module.exports = mongoose.model('Document', documentSchema);

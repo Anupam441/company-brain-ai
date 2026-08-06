@@ -1,4 +1,5 @@
 ﻿const DocumentChunk = require('../models/DocumentChunk');
+const Document = require('../models/Document');
 const generateEmbedding = require('./generateEmbedding');
 function cosineSimilarity(vecA, vecB) {
   let dotProduct = 0;
@@ -11,9 +12,25 @@ function cosineSimilarity(vecA, vecB) {
   }
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
-async function retrieveRelevantChunks(workspaceId, question, topK = 5) {
+async function retrieveRelevantChunks(workspaceId, question, membership, topK = 5) {
   const questionEmbedding = await generateEmbedding(question);
-  const allChunks = await DocumentChunk.find({ workspace: workspaceId }).populate('document');
+  // Figure out which documents this member is allowed to see
+  let docQuery = { workspace: workspaceId };
+  if (membership.role !== 'admin') {
+    docQuery = {
+      workspace: workspaceId,
+      $or: [
+        { visibility: 'public' },
+        { visibility: 'restricted', allowedDepartments: membership.department }
+      ]
+    };
+  }
+  const allowedDocs = await Document.find(docQuery).select('_id');
+  const allowedDocIds = allowedDocs.map((d) => d._id);
+  const allChunks = await DocumentChunk.find({
+    workspace: workspaceId,
+    document: { $in: allowedDocIds }
+  }).populate('document');
   const scoredChunks = allChunks.map((chunk) => ({
     chunk,
     score: cosineSimilarity(questionEmbedding, chunk.embedding)

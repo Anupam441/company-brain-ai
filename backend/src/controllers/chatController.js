@@ -3,7 +3,6 @@ const Message = require('../models/Message');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const retrieveRelevantChunks = require('../services/retrieveChunks');
 const generateAnswer = require('../services/generateAnswer');
-// START NEW CONVERSATION
 exports.createConversation = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
@@ -21,7 +20,6 @@ exports.createConversation = async (req, res) => {
     res.status(500).json({ message: 'Failed to create conversation', error: error.message });
   }
 };
-// SEND MESSAGE (ask a question, get AI answer)
 exports.sendMessage = async (req, res) => {
   try {
     const { conversationId } = req.params;
@@ -41,18 +39,16 @@ exports.sendMessage = async (req, res) => {
     if (!membership) {
       return res.status(403).json({ message: 'You are not authorized for this conversation' });
     }
-    // Save user's message
     await Message.create({
       conversation: conversationId,
       sender: 'user',
       content: question
     });
-    // Retrieve relevant chunks
-    const relevantChunks = await retrieveRelevantChunks(conversation.workspace, question);
+    const relevantChunks = await retrieveRelevantChunks(conversation.workspace, question, membership);
     let aiAnswer;
     let citedDocuments = [];
     if (relevantChunks.length === 0) {
-      aiAnswer = "I don't have any documents to search yet. Please upload some documents first.";
+      aiAnswer = "I don't have any documents to search yet, or you don't have access to relevant documents. Please upload some documents first.";
     } else {
       aiAnswer = await generateAnswer(question, relevantChunks);
       const seen = new Set();
@@ -64,7 +60,6 @@ exports.sendMessage = async (req, res) => {
         })
         .map((c) => ({ documentId: c.documentId, documentName: c.documentName }));
     }
-    // Save AI's message
     const aiMessage = await Message.create({
       conversation: conversationId,
       sender: 'ai',
@@ -80,7 +75,6 @@ exports.sendMessage = async (req, res) => {
     res.status(500).json({ message: 'Failed to process message', error: error.message });
   }
 };
-// GET CONVERSATION HISTORY
 exports.getMessages = async (req, res) => {
   try {
     const { conversationId } = req.params;

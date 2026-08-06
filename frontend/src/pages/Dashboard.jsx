@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+const DEPARTMENTS = ['general', 'hr', 'engineering', 'sales', 'finance'];
 function Dashboard() {
   const { user, logout } = useAuth();
   const [workspace, setWorkspace] = useState(null);
@@ -8,6 +9,9 @@ function Dashboard() {
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [visibility, setVisibility] = useState('public');
+  const [selectedDepts, setSelectedDepts] = useState([]);
+  const [pendingFile, setPendingFile] = useState(null);
   useEffect(() => {
     loadWorkspace();
   }, []);
@@ -36,28 +40,51 @@ function Dashboard() {
     e.preventDefault();
     try {
       const res = await api.post('/workspaces', { name: newWorkspaceName });
-      setWorkspace({ id: res.data.workspace._id, name: res.data.workspace.name, role: 'admin' });
+      setWorkspace({ id: res.data.workspace._id, name: res.data.workspace.name, role: 'admin', department: 'general' });
       setNewWorkspaceName('');
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create workspace');
     }
   };
-  const handleFileUpload = async (e) => {
+  const handleFileSelect = (e) => {
     const file = e.target.files[0];
-    if (!file || !workspace) return;
+    if (file) setPendingFile(file);
+  };
+  const handleUploadConfirm = async () => {
+    if (!pendingFile || !workspace) return;
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', pendingFile);
+    formData.append('visibility', visibility);
+    if (visibility === 'restricted') {
+      formData.append('allowedDepartments', JSON.stringify(selectedDepts));
+    }
     setUploading(true);
     try {
       await api.post(`/documents/${workspace.id}/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       loadDocuments(workspace.id);
+      setPendingFile(null);
+      setVisibility('public');
+      setSelectedDepts([]);
     } catch (err) {
       alert(err.response?.data?.message || 'Upload failed');
     } finally {
       setUploading(false);
-      e.target.value = '';
+    }
+  };
+  const toggleDept = (dept) => {
+    setSelectedDepts((prev) =>
+      prev.includes(dept) ? prev.filter((d) => d !== dept) : [...prev, dept]
+    );
+  };
+  const handleDelete = async (docId) => {
+    if (!confirm('Delete this document?')) return;
+    try {
+      await api.delete(`/documents/${docId}`);
+      loadDocuments(workspace.id);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Delete failed');
     }
   };
   useEffect(() => {
@@ -74,10 +101,13 @@ function Dashboard() {
         <div>
           <h1 style={{ fontSize: '28px', margin: 0 }}>Hi, {user?.name} 👋</h1>
           <p style={{ color: '#9ca3af', margin: '4px 0 0' }}>
-            {workspace ? workspace.name : 'No workspace yet'}
+            {workspace ? `${workspace.name} · ${workspace.role} · ${workspace.department || 'general'}` : 'No workspace yet'}
           </p>
         </div>
-        <button onClick={logout} style={secondaryButton}>Logout</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {workspace && <a href="/team" style={secondaryButton}>👥 Team</a>}
+          <button onClick={logout} style={secondaryButton}>Logout</button>
+        </div>
       </div>
       {!workspace ? (
         <form onSubmit={handleCreateWorkspace} style={glassCard}>
@@ -96,24 +126,74 @@ function Dashboard() {
         <>
           <div style={glassCard}>
             <h3 style={{ marginTop: 0 }}>📄 Documents</h3>
-            <label style={{ ...primaryButton, display: 'inline-block', cursor: 'pointer' }}>
-              {uploading ? 'Uploading...' : '+ Upload Document'}
-              <input
-                type="file"
-                accept=".pdf,.docx,.txt"
-                onChange={handleFileUpload}
-                disabled={uploading}
-                style={{ display: 'none' }}
-              />
-            </label>
+            {!pendingFile ? (
+              <label style={{ ...primaryButton, display: 'inline-block', cursor: 'pointer' }}>
+                + Choose File
+                <input type="file" accept=".pdf,.docx,.txt" onChange={handleFileSelect} style={{ display: 'none' }} />
+              </label>
+            ) : (
+              <div style={{ background: 'rgba(255,255,255,0.04)', padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
+                <p style={{ margin: '0 0 12px', fontSize: '14px' }}>📎 {pendingFile.name}</p>
+                <p style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '8px' }}>Who can see this document?</p>
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+                  <label style={radioLabel}>
+                    <input type="radio" checked={visibility === 'public'} onChange={() => setVisibility('public')} /> Everyone
+                  </label>
+                  <label style={radioLabel}>
+                    <input type="radio" checked={visibility === 'restricted'} onChange={() => setVisibility('restricted')} /> Specific departments
+                  </label>
+                </div>
+                {visibility === 'restricted' && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                    {DEPARTMENTS.map((dept) => (
+                      <button
+                        type="button"
+                        key={dept}
+                        onClick={() => toggleDept(dept)}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '20px',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          background: selectedDepts.includes(dept) ? 'linear-gradient(135deg, #a855f7, #3b82f6)' : 'transparent',
+                          color: '#fff',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          textTransform: 'capitalize'
+                        }}
+                      >
+                        {dept}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={handleUploadConfirm} disabled={uploading} style={primaryButton}>
+                    {uploading ? 'Uploading...' : 'Upload'}
+                  </button>
+                  <button onClick={() => setPendingFile(null)} style={secondaryButton}>Cancel</button>
+                </div>
+              </div>
+            )}
             <div style={{ marginTop: '20px' }}>
               {documents.length === 0 && (
                 <p style={{ color: '#9ca3af' }}>No documents yet. Upload one to get started.</p>
               )}
               {documents.map((doc) => (
                 <div key={doc._id} style={docRow}>
-                  <span>{doc.originalName}</span>
-                  <span style={statusBadge(doc.status)}>{doc.status}</span>
+                  <span>
+                    {doc.originalName}
+                    {doc.visibility === 'restricted' && (
+                      <span style={{ fontSize: '11px', color: '#c4b5fd', marginLeft: '8px' }}>
+                        🔒 {doc.allowedDepartments?.join(', ')}
+                      </span>
+                    )}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={statusBadge(doc.status)}>{doc.status}</span>
+                    {workspace.role === 'admin' && (
+                      <button onClick={() => handleDelete(doc._id)} style={deleteBtn}>🗑️</button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -164,7 +244,9 @@ const secondaryButton = {
   border: '1px solid rgba(255,255,255,0.15)',
   borderRadius: '10px',
   color: '#fff',
-  cursor: 'pointer'
+  cursor: 'pointer',
+  textDecoration: 'none',
+  fontSize: '14px'
 };
 const docRow = {
   display: 'flex',
@@ -180,4 +262,17 @@ const statusBadge = (status) => ({
   background: status === 'ready' ? 'rgba(34,197,94,0.15)' : status === 'failed' ? 'rgba(239,68,68,0.15)' : 'rgba(234,179,8,0.15)',
   color: status === 'ready' ? '#4ade80' : status === 'failed' ? '#f87171' : '#facc15'
 });
+const radioLabel = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  fontSize: '14px',
+  cursor: 'pointer'
+};
+const deleteBtn = {
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '15px'
+};
 export default Dashboard;
