@@ -7,14 +7,17 @@ import Dashboard from './pages/Dashboard';
 import Chat from './pages/Chat';
 import Team from './pages/Team';
 import './index.css';
+
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
   return user ? children : <Navigate to="/login" />;
 }
+
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/login/:department" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
@@ -23,6 +26,7 @@ function AppRoutes() {
     </Routes>
   );
 }
+
 function App() {
   return (
     <AuthProvider>
@@ -33,4 +37,5 @@ function App() {
     </AuthProvider>
   );
 }
+
 export default App;
