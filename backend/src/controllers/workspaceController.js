@@ -1,7 +1,8 @@
 ﻿const Workspace = require('../models/Workspace');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const User = require('../models/User');
-// CREATE WORKSPACE
+const AuditLog = require('../models/AuditLog');
+const logAction = require('../services/auditLog');
 exports.createWorkspace = async (req, res) => {
   try {
     const { name } = req.body;
@@ -16,12 +17,15 @@ exports.createWorkspace = async (req, res) => {
       role: 'admin',
       department: 'general'
     });
+    logAction({
+      workspaceId: workspace._id, userId, action: 'created workspace',
+      targetType: 'workspace', targetName: workspace.name
+    });
     res.status(201).json({ message: 'Workspace created successfully', workspace });
   } catch (error) {
     res.status(500).json({ message: 'Failed to create workspace', error: error.message });
   }
 };
-// GET MY WORKSPACES
 exports.getMyWorkspaces = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -38,7 +42,6 @@ exports.getMyWorkspaces = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch workspaces', error: error.message });
   }
 };
-// INVITE MEMBER TO WORKSPACE
 exports.inviteMember = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
@@ -69,6 +72,10 @@ exports.inviteMember = async (req, res) => {
       role: role === 'admin' ? 'admin' : 'member',
       department: validDepartments.includes(department) ? department : 'general'
     });
+    logAction({
+      workspaceId, userId: requesterId, action: 'invited member',
+      targetType: 'member', targetName: userToInvite.email
+    });
     res.status(201).json({
       message: 'Member added successfully',
       member: {
@@ -83,7 +90,6 @@ exports.inviteMember = async (req, res) => {
     res.status(500).json({ message: 'Failed to invite member', error: error.message });
   }
 };
-// GET WORKSPACE MEMBERS
 exports.getMembers = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
@@ -108,7 +114,6 @@ exports.getMembers = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch members', error: error.message });
   }
 };
-// UPDATE MEMBER DEPARTMENT/ROLE (admin only)
 exports.updateMember = async (req, res) => {
   try {
     const { id: workspaceId, memberId } = req.params;
@@ -124,20 +129,50 @@ exports.updateMember = async (req, res) => {
     const targetMembership = await WorkspaceMember.findOne({
       user: memberId,
       workspace: workspaceId
-    });
+    }).populate('user');
     if (!targetMembership) {
       return res.status(404).json({ message: 'Member not found in this workspace' });
     }
     const validDepartments = ['general', 'hr', 'engineering', 'sales', 'finance'];
-    if (department && validDepartments.includes(department)) {
+    const changes = [];
+    if (department && validDepartments.includes(department) && department !== targetMembership.department) {
+      changes.push(`department → ${department}`);
       targetMembership.department = department;
     }
-    if (role && ['admin', 'member'].includes(role)) {
+    if (role && ['admin', 'member'].includes(role) && role !== targetMembership.role) {
+      changes.push(`role → ${role}`);
       targetMembership.role = role;
     }
     await targetMembership.save();
+    if (changes.length > 0) {
+      logAction({
+        workspaceId, userId: requesterId, action: `updated member (${changes.join(', ')})`,
+        targetType: 'member', targetName: targetMembership.user.email
+      });
+    }
     res.status(200).json({ message: 'Member updated successfully', member: targetMembership });
   } catch (error) {
     res.status(500).json({ message: 'Failed to update member', error: error.message });
+  }
+};
+// GET AUDIT LOGS (admin only)
+exports.getAuditLogs = async (req, res) => {
+  try {
+    const { id: workspaceId } = req.params;
+    const requesterId = req.user.id;
+    const requesterMembership = await WorkspaceMember.findOne({
+      user: requesterId,
+      workspace: workspaceId
+    });
+    if (!requesterMembership || requesterMembership.role !== 'admin') {
+      return res.status(403).json({ message: 'Only workspace admins can view audit logs' });
+    }
+    const logs = await AuditLog.find({ workspace: workspaceId })
+      .populate('user', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.status(200).json({ logs });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch audit logs', error: error.message });
   }
 };

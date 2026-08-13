@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { path: '/chat', label: 'Chat', icon: '💬' },
   { path: '/team', label: 'Team', icon: '👥' },
   { path: '/analytics', label: 'Analytics', icon: '📊', adminOnly: true },
+  { path: '/activity', label: 'Activity', icon: '🕓', adminOnly: true },
 ];
 function SidebarLayout({ children, workspace, theme }) {
   const { user, logout } = useAuth();

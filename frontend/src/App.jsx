@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard';
 import Chat from './pages/Chat';
 import Team from './pages/Team';
 import Analytics from './pages/Analytics';
+import Activity from './pages/Activity';
 import './index.css';
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -25,6 +26,7 @@ function AppRoutes() {
       <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
       <Route path="/team" element={<ProtectedRoute><Team /></ProtectedRoute>} />
       <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+      <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
       <Route path="/" element={<Navigate to="/login" />} />
     </Routes>
   );

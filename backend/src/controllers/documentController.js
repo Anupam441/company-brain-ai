@@ -2,6 +2,7 @@
 const DocumentChunk = require('../models/DocumentChunk');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const processDocument = require('../services/processDocument');
+const logAction = require('../services/auditLog');
 exports.uploadDocument = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
@@ -33,6 +34,10 @@ exports.uploadDocument = async (req, res) => {
       allowedDepartments: deptList
     });
     processDocument(document._id);
+    logAction({
+      workspaceId, userId, action: 'uploaded document',
+      targetType: 'document', targetName: document.originalName
+    });
     res.status(201).json({
       message: 'File uploaded successfully, processing will begin shortly',
       document
@@ -68,7 +73,6 @@ exports.getDocuments = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch documents', error: error.message });
   }
 };
-// GET DOCUMENT PREVIEW (content)
 exports.getDocumentPreview = async (req, res) => {
   try {
     const { docId } = req.params;
@@ -84,7 +88,6 @@ exports.getDocumentPreview = async (req, res) => {
     if (!membership) {
       return res.status(403).json({ message: 'Not authorized' });
     }
-    // Non-admins can only preview documents they're allowed to see
     if (membership.role !== 'admin' && document.visibility === 'restricted') {
       if (!document.allowedDepartments.includes(membership.department)) {
         return res.status(403).json({ message: 'You do not have access to this document' });
@@ -122,8 +125,14 @@ exports.deleteDocument = async (req, res) => {
     if (!membership || membership.role !== 'admin') {
       return res.status(403).json({ message: 'Only admins can delete documents' });
     }
+    const docName = document.originalName;
+    const workspaceId = document.workspace;
     await Document.findByIdAndDelete(docId);
     await DocumentChunk.deleteMany({ document: docId });
+    logAction({
+      workspaceId, userId, action: 'deleted document',
+      targetType: 'document', targetName: docName
+    });
     res.status(200).json({ message: 'Document deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Failed to delete document', error: error.message });
