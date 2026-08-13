@@ -1,25 +1,41 @@
 ﻿import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { useAppTheme } from '../context/ThemeContext';
 import api from '../services/api';
 import { getDeptTheme } from '../utils/departmentTheme';
-
+import SidebarLayout from '../components/SidebarLayout';
+import ConfirmModal from '../components/ConfirmModal';
+import PreviewModal from '../components/PreviewModal';
 const DEPARTMENTS = ['general', 'hr', 'engineering', 'sales', 'finance'];
-
+function fileIcon(name = '') {
+  const ext = name.split('.').pop().toLowerCase();
+  if (ext === 'pdf') return { icon: '📕' };
+  if (ext === 'docx' || ext === 'doc') return { icon: '📘' };
+  return { icon: '📄' };
+}
 function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const { t } = useAppTheme();
   const [workspace, setWorkspace] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [members, setMembers] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   const [loading, setLoading] = useState(true);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [visibility, setVisibility] = useState('public');
   const [selectedDepts, setSelectedDepts] = useState([]);
-  const [pendingFile, setPendingFile] = useState(null);
-
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
   useEffect(() => { loadWorkspace(); }, []);
-
   const loadWorkspace = async () => {
     try {
       const res = await api.get('/workspaces');
@@ -32,252 +48,291 @@ function Dashboard() {
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   };
-
   const loadDocuments = async (workspaceId) => {
     try {
       const res = await api.get(`/documents/${workspaceId}`);
       setDocuments(res.data.documents);
     } catch (err) { console.error(err); }
   };
-
   const loadMembers = async (workspaceId) => {
     try {
       const res = await api.get(`/workspaces/${workspaceId}/members`);
       setMembers(res.data.members);
     } catch (err) { console.error(err); }
   };
-
   const handleCreateWorkspace = async (e) => {
     e.preventDefault();
     try {
       const res = await api.post('/workspaces', { name: newWorkspaceName });
       setWorkspace({ id: res.data.workspace._id, name: res.data.workspace.name, role: 'admin', department: 'general' });
       setNewWorkspaceName('');
-    } catch (err) { alert(err.response?.data?.message || 'Failed to create workspace'); }
+      showToast('Workspace created successfully', 'success');
+    } catch (err) { showToast(err.response?.data?.message || 'Failed to create workspace', 'error'); }
   };
-
   const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (file) setPendingFile(file);
+    const files = Array.from(e.target.files);
+    if (files.length) setPendingFiles(files);
   };
-
-  const handleUploadConfirm = async () => {
-    if (!pendingFile || !workspace) return;
-    const formData = new FormData();
-    formData.append('file', pendingFile);
-    formData.append('visibility', workspace.role === 'admin' ? visibility : 'public');
-    if (workspace.role === 'admin' && visibility === 'restricted') {
-      formData.append('allowedDepartments', JSON.stringify(selectedDepts));
-    }
-    setUploading(true);
-    try {
-      await api.post(`/documents/${workspace.id}/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      loadDocuments(workspace.id);
-      setPendingFile(null);
-      setVisibility('public');
-      setSelectedDepts([]);
-    } catch (err) { alert(err.response?.data?.message || 'Upload failed'); }
-    finally { setUploading(false); }
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length) setPendingFiles(files);
   };
-
+  const removePendingFile = (idx) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
   const toggleDept = (dept) => {
     setSelectedDepts((prev) => prev.includes(dept) ? prev.filter((d) => d !== dept) : [...prev, dept]);
   };
-
-  const handleDelete = async (docId) => {
-    if (!confirm('Delete this document?')) return;
-    try {
-      await api.delete(`/documents/${docId}`);
-      loadDocuments(workspace.id);
-    } catch (err) { alert(err.response?.data?.message || 'Delete failed'); }
+  const handleUploadConfirm = async () => {
+    if (pendingFiles.length === 0 || !workspace) return;
+    setUploading(true);
+    setUploadProgress({ done: 0, total: pendingFiles.length });
+    let successCount = 0;
+    for (const file of pendingFiles) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('visibility', workspace.role === 'admin' ? visibility : 'public');
+      if (workspace.role === 'admin' && visibility === 'restricted') {
+        formData.append('allowedDepartments', JSON.stringify(selectedDepts));
+      }
+      try {
+        await api.post(`/documents/${workspace.id}/upload`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        successCount++;
+      } catch (err) {
+        showToast(`Failed: ${file.name}`, 'error');
+      }
+      setUploadProgress((prev) => ({ ...prev, done: prev.done + 1 }));
+    }
+    loadDocuments(workspace.id);
+    setPendingFiles([]);
+    setVisibility('public');
+    setSelectedDepts([]);
+    setUploading(false);
+    if (successCount > 0) showToast(`${successCount} document${successCount > 1 ? 's' : ''} uploaded — processing started`, 'success');
   };
-
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await api.delete(`/documents/${deleteTarget}`);
+      loadDocuments(workspace.id);
+      showToast('Document deleted', 'success');
+    } catch (err) { showToast(err.response?.data?.message || 'Delete failed', 'error'); }
+    finally { setDeleteTarget(null); }
+  };
+  const openPreview = async (docId) => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewData(null);
+    try {
+      const res = await api.get(`/documents/preview/${docId}`);
+      setPreviewData(res.data);
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to load preview', 'error');
+      setPreviewOpen(false);
+    } finally { setPreviewLoading(false); }
+  };
   useEffect(() => {
     if (!workspace) return;
     const interval = setInterval(() => loadDocuments(workspace.id), 5000);
     return () => clearInterval(interval);
   }, [workspace]);
-
   if (loading) {
-    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;
+    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.textMuted }}>Loading...</div>;
   }
-
   if (!workspace) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-        <motion.form onSubmit={handleCreateWorkspace} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...glassCard, maxWidth: '400px', width: '100%' }}>
-          <h1 style={{ fontSize: '22px' }}>Hi, {user?.name} 👋</h1>
-          <h3 style={{ marginTop: 0 }}>Create your first workspace</h3>
-          <input type="text" placeholder="Workspace name (e.g. Acme Inc)" value={newWorkspaceName} onChange={(e) => setNewWorkspaceName(e.target.value)} required style={inputStyle} />
-          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} type="submit" style={primaryButton}>Create Workspace</motion.button>
+        <motion.form onSubmit={handleCreateWorkspace} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+          style={{ ...glassCard(t), maxWidth: '420px', width: '100%' }}>
+          <h1 style={{ fontSize: '20px', color: t.text, margin: '0 0 4px' }}>Hi, {user?.name} 👋</h1>
+          <p style={{ color: t.textMuted, fontSize: '13px', margin: '0 0 20px' }}>Let's set up your workspace</p>
+          <input type="text" placeholder="Workspace name (e.g. Acme Inc)" value={newWorkspaceName} onChange={(e) => setNewWorkspaceName(e.target.value)} required style={inputStyle(t)} />
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" style={primaryButton()}>Create Workspace →</motion.button>
         </motion.form>
       </div>
     );
   }
-
   const theme = getDeptTheme(workspace.department);
   const isAdmin = workspace.role === 'admin';
-
-  const sharedProps = {
-    user, workspace, documents, members, theme, logout,
-    pendingFile, visibility, selectedDepts, uploading,
-    handleFileSelect, handleUploadConfirm, toggleDept, setPendingFile, setVisibility, handleDelete
-  };
-
-  return isAdmin ? <AdminView {...sharedProps} /> : <MemberView {...sharedProps} />;
-}
-
-// ============ ADMIN VIEW ============
-function AdminView({ user, workspace, documents, members, theme, logout, pendingFile, visibility, selectedDepts, uploading, handleFileSelect, handleUploadConfirm, toggleDept, setPendingFile, setVisibility, handleDelete }) {
   const readyCount = documents.filter((d) => d.status === 'ready').length;
-
+  const processingCount = documents.filter((d) => d.status === 'processing').length;
+  const filteredDocs = documents.filter((d) => d.originalName.toLowerCase().includes(searchQuery.toLowerCase()));
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} style={{ minHeight: '100vh', padding: '40px 20px', maxWidth: '850px', margin: '0 auto' }}>
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '4px 12px', borderRadius: '20px', background: theme.glow, marginBottom: '8px', fontSize: '12px' }}>
-            {theme.icon} Admin · {theme.label}
+    <SidebarLayout workspace={workspace} theme={theme}>
+      <div style={{ padding: '36px 40px', maxWidth: '1100px' }}>
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: '28px' }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 12px',
+            borderRadius: '20px', background: theme.glow, marginBottom: '10px', fontSize: '11.5px', color: theme.color, fontWeight: 600
+          }}>
+            {theme.icon} {isAdmin ? 'Admin' : 'Member'} · {theme.label}
           </div>
-          <h1 style={{ fontSize: '28px', margin: 0 }}>Hi, {user?.name} 👋</h1>
-          <p style={{ color: '#9ca3af', margin: '4px 0 0' }}>{workspace.name}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <motion.a whileHover={{ scale: 1.05 }} href="/team" style={secondaryButton}>👥 Team</motion.a>
-          <motion.button whileHover={{ scale: 1.05 }} onClick={logout} style={secondaryButton}>Logout</motion.button>
-        </div>
-      </motion.div>
-
-      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
-        <StatCard label="Documents" value={documents.length} color={theme.color} />
-        <StatCard label="Ready" value={readyCount} color="#4ade80" />
-        <StatCard label="Team Members" value={members.length} color={theme.color} />
-      </motion.div>
-
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} style={glassCard}>
-        <h3 style={{ marginTop: 0 }}>📄 Documents</h3>
-
-        {!pendingFile ? (
-          <motion.label whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} style={{ ...primaryButton(theme), display: 'inline-block', cursor: 'pointer' }}>
-            + Choose File
-            <input type="file" accept=".pdf,.docx,.txt" onChange={handleFileSelect} style={{ display: 'none' }} />
-          </motion.label>
-        ) : (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} style={{ background: 'rgba(255,255,255,0.04)', padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
-            <p style={{ margin: '0 0 12px', fontSize: '14px' }}>📎 {pendingFile.name}</p>
-            <p style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '8px' }}>Who can see this document?</p>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
-              <label style={radioLabel}><input type="radio" checked={visibility === 'public'} onChange={() => setVisibility('public')} /> Everyone</label>
-              <label style={radioLabel}><input type="radio" checked={visibility === 'restricted'} onChange={() => setVisibility('restricted')} /> Specific departments</label>
-            </div>
-            {visibility === 'restricted' && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
-                {DEPARTMENTS.map((dept) => (
-                  <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} type="button" key={dept} onClick={() => toggleDept(dept)}
-                    style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.15)', background: selectedDepts.includes(dept) ? `linear-gradient(135deg, ${theme.color}, #3b82f6)` : 'transparent', color: '#fff', fontSize: '13px', cursor: 'pointer', textTransform: 'capitalize' }}
-                  >{dept}</motion.button>
+          <h1 style={{ fontSize: '25px', margin: 0, color: t.text, fontWeight: 700, letterSpacing: '-0.3px' }}>
+            {isAdmin ? `Welcome back, ${user?.name}` : `Hi, ${user?.name}`}
+          </h1>
+          <p style={{ color: t.textMuted, margin: '5px 0 0', fontSize: '13.5px' }}>
+            {isAdmin ? "Here's what's happening in your workspace." : 'Browse documents or ask Company Brain a question.'}
+          </p>
+        </motion.div>
+        {isAdmin && (
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '24px' }}>
+            <StatCard icon="📄" label="Documents" value={documents.length} tint="#a855f7" t={t} />
+            <StatCard icon="✅" label="Ready to search" value={readyCount} tint="#4ade80" sub={processingCount > 0 ? `${processingCount} processing` : null} t={t} />
+            <StatCard icon="👥" label="Team members" value={members.length} tint="#60a5fa" t={t} />
+          </motion.div>
+        )}
+        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} style={glassCard(t)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '12px', flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0, fontSize: '15px', color: t.text, fontWeight: 600 }}>Documents</h3>
+            <input
+              type="text" placeholder="🔍 Search documents..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ padding: '7px 12px', borderRadius: '8px', border: `1px solid ${t.inputBorder}`, background: t.inputBg, color: t.text, fontSize: '12.5px', outline: 'none', width: '220px' }}
+            />
+          </div>
+          {pendingFiles.length === 0 ? (
+            <motion.label
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              whileHover={{ borderColor: theme.color }}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                padding: '32px 20px', borderRadius: '12px', cursor: 'pointer', marginBottom: '20px',
+                border: `1.5px dashed ${dragOver ? theme.color : t.panelBorder}`,
+                background: dragOver ? theme.glow : t.inputBg,
+                transition: 'background 0.15s'
+              }}
+            >
+              <div style={{ fontSize: '26px', marginBottom: '8px' }}>📤</div>
+              <div style={{ fontSize: '13.5px', color: t.text, fontWeight: 500, marginBottom: '3px' }}>
+                Drop files here, or click to browse
+              </div>
+              <div style={{ fontSize: '11.5px', color: t.textFaint }}>PDF, DOCX, or TXT — multiple files supported</div>
+              <input type="file" accept=".pdf,.docx,.txt" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
+            </motion.label>
+          ) : (
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+              style={{ background: t.inputBg, border: `1px solid ${t.panelBorder}`, padding: '16px', borderRadius: '10px', marginBottom: '18px' }}>
+              <div style={{ fontSize: '12.5px', color: t.textMuted, marginBottom: '10px' }}>{pendingFiles.length} file{pendingFiles.length > 1 ? 's' : ''} selected</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px', maxHeight: '140px', overflowY: 'auto' }}>
+                {pendingFiles.map((f, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: t.text, padding: '4px 0' }}>
+                    <span>{fileIcon(f.name).icon} {f.name}</span>
+                    {!uploading && <button onClick={() => removePendingFile(i)} style={{ background: 'transparent', border: 'none', color: t.textFaint, cursor: 'pointer', fontSize: '13px' }}>✕</button>}
+                  </div>
                 ))}
               </div>
-            )}
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <motion.button whileHover={{ scale: 1.03 }} onClick={handleUploadConfirm} disabled={uploading} style={primaryButton(theme)}>{uploading ? 'Uploading...' : 'Upload'}</motion.button>
-              <motion.button whileHover={{ scale: 1.03 }} onClick={() => setPendingFile(null)} style={secondaryButton}>Cancel</motion.button>
-            </div>
-          </motion.div>
-        )}
-
-        <div style={{ marginTop: '20px' }}>
-          {documents.length === 0 && <p style={{ color: '#9ca3af' }}>No documents yet. Upload one to get started.</p>}
-          <AnimatePresence>
-            {documents.map((doc) => (
-              <motion.div key={doc._id} initial={{ opacity: 0, x: -15 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 15 }} style={docRow}>
-                <span>
-                  {doc.originalName}
-                  {doc.visibility === 'restricted' && <span style={{ fontSize: '11px', color: theme.color, marginLeft: '8px' }}>🔒 {doc.allowedDepartments?.join(', ')}</span>}
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={statusBadge(doc.status)}>{doc.status}</span>
-                  <motion.button whileHover={{ scale: 1.2 }} onClick={() => handleDelete(doc._id)} style={deleteBtn}>🗑️</motion.button>
+              {isAdmin && (
+                <>
+                  <p style={{ fontSize: '12px', color: t.textMuted, marginBottom: '8px' }}>Visibility (applies to all)</p>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                    {['public', 'restricted'].map((v) => (
+                      <button key={v} onClick={() => setVisibility(v)} style={{
+                        padding: '6px 14px', borderRadius: '7px', fontSize: '12.5px', cursor: 'pointer',
+                        border: `1px solid ${visibility === v ? theme.color : t.panelBorder}`,
+                        background: visibility === v ? theme.glow : 'transparent',
+                        color: visibility === v ? theme.color : t.textMuted
+                      }}>{v === 'public' ? 'Everyone' : 'Specific departments'}</button>
+                    ))}
+                  </div>
+                  {visibility === 'restricted' && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                      {DEPARTMENTS.map((dept) => (
+                        <button key={dept} onClick={() => toggleDept(dept)} style={{
+                          padding: '5px 12px', borderRadius: '16px', fontSize: '11.5px', cursor: 'pointer', textTransform: 'capitalize',
+                          border: `1px solid ${t.panelBorder}`,
+                          background: selectedDepts.includes(dept) ? theme.color : 'transparent',
+                          color: selectedDepts.includes(dept) ? '#fff' : t.textMuted
+                        }}>{dept}</button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              {uploading && (
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{ fontSize: '11.5px', color: t.textMuted, marginBottom: '4px' }}>Uploading {uploadProgress.done}/{uploadProgress.total}…</div>
+                  <div style={{ height: '5px', background: t.inputBg, borderRadius: '4px', overflow: 'hidden' }}>
+                    <motion.div animate={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }} style={{ height: '100%', background: theme.color }} />
+                  </div>
                 </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      </motion.div>
-
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} style={{ textAlign: 'center', marginTop: '24px' }}>
-        <motion.a whileHover={{ scale: 1.05, boxShadow: `0 0 25px ${theme.glow}` }} href="/chat" style={{ ...primaryButton(theme), textDecoration: 'none', display: 'inline-block' }}>💬 Go to Chat</motion.a>
-      </motion.div>
-    </motion.div>
+              )}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <motion.button whileHover={{ scale: 1.02 }} onClick={handleUploadConfirm} disabled={uploading} style={{ ...primaryButton(theme), padding: '8px 18px', fontSize: '13px', width: 'auto' }}>
+                  {uploading ? 'Uploading…' : `Upload ${pendingFiles.length} file${pendingFiles.length > 1 ? 's' : ''}`}
+                </motion.button>
+                {!uploading && <button onClick={() => setPendingFiles([])} style={ghostButton(t)}>Cancel</button>}
+              </div>
+            </motion.div>
+          )}
+          <div>
+            {filteredDocs.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '20px 0 4px', color: t.textFaint, fontSize: '13px' }}>
+                {documents.length === 0 ? 'No documents yet.' : 'No documents match your search.'}
+              </div>
+            )}
+            <AnimatePresence>
+              {filteredDocs.map((doc) => {
+                const fi = fileIcon(doc.originalName);
+                return (
+                  <motion.div key={doc._id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
+                    whileHover={{ background: t.hoverBg }} style={{ ...docRow, cursor: 'pointer' }}
+                    onClick={() => openPreview(doc._id)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                      <div style={{ width: '34px', height: '34px', borderRadius: '8px', flexShrink: 0, background: t.inputBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' }}>{fi.icon}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '13.5px', color: t.text, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '320px' }}>{doc.originalName}</div>
+                        {doc.visibility === 'restricted' && (
+                          <div style={{ fontSize: '11px', color: theme.color, marginTop: '2px' }}>🔒 {doc.allowedDepartments?.join(', ')}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                      <span style={statusBadge(doc.status)}>{doc.status}</span>
+                      {isAdmin && <button onClick={() => setDeleteTarget(doc._id)} style={deleteBtn} title="Delete">🗑️</button>}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+      </div>
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete this document?"
+        message="This will permanently remove the document and its indexed content. This can't be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+      <PreviewModal
+        open={previewOpen}
+        loading={previewLoading}
+        data={previewData}
+        onClose={() => setPreviewOpen(false)}
+        accentColor={theme.color}
+      />
+    </SidebarLayout>
   );
 }
-
-// ============ MEMBER VIEW ============
-function MemberView({ user, workspace, documents, theme, logout, pendingFile, uploading, handleFileSelect, handleUploadConfirm, setPendingFile }) {
+function StatCard({ icon, label, value, tint, sub, t }) {
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} style={{ minHeight: '100vh', padding: '40px 20px', maxWidth: '650px', margin: '0 auto' }}>
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: 'center', marginBottom: '30px' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 16px', borderRadius: '20px', background: theme.glow, marginBottom: '14px', fontSize: '14px' }}>
-          {theme.icon} {theme.label} Team
-        </div>
-        <h1 style={{ fontSize: '26px', margin: '0 0 4px' }}>Welcome, {user?.name} 👋</h1>
-        <p style={{ color: '#9ca3af', margin: 0 }}>{workspace.name}</p>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '14px' }}>
-          <motion.a whileHover={{ scale: 1.05, boxShadow: `0 0 25px ${theme.glow}` }} href="/chat" style={{ ...primaryButton(theme), textDecoration: 'none' }}>💬 Ask Company Brain</motion.a>
-          <motion.a whileHover={{ scale: 1.05 }} href="/team" style={secondaryButton}>👥 Team</motion.a>
-          <motion.button whileHover={{ scale: 1.05 }} onClick={logout} style={secondaryButton}>Logout</motion.button>
-        </div>
-      </motion.div>
-
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} style={glassCard}>
-        <h3 style={{ marginTop: 0 }}>📄 Your Accessible Documents</h3>
-
-        {!pendingFile ? (
-          <motion.label whileHover={{ scale: 1.03 }} style={{ ...primaryButton(theme), display: 'inline-block', cursor: 'pointer', fontSize: '14px' }}>
-            + Share a document (visible to everyone)
-            <input type="file" accept=".pdf,.docx,.txt" onChange={handleFileSelect} style={{ display: 'none' }} />
-          </motion.label>
-        ) : (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} style={{ background: 'rgba(255,255,255,0.04)', padding: '14px', borderRadius: '12px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '14px' }}>📎 {pendingFile.name}</span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <motion.button whileHover={{ scale: 1.05 }} onClick={handleUploadConfirm} disabled={uploading} style={primaryButton(theme)}>{uploading ? '...' : 'Upload'}</motion.button>
-              <motion.button whileHover={{ scale: 1.05 }} onClick={() => setPendingFile(null)} style={secondaryButton}>✕</motion.button>
-            </div>
-          </motion.div>
-        )}
-
-        <div style={{ marginTop: '16px' }}>
-          {documents.length === 0 && <p style={{ color: '#9ca3af', fontSize: '14px' }}>No documents available to you yet.</p>}
-          <AnimatePresence>
-            {documents.map((doc) => (
-              <motion.div key={doc._id} initial={{ opacity: 0, x: -15 }} animate={{ opacity: 1, x: 0 }} style={docRow}>
-                <span>{doc.originalName}</span>
-                <span style={statusBadge(doc.status)}>{doc.status}</span>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      </motion.div>
+    <motion.div whileHover={{ y: -2 }} style={{ background: t.panelBg, border: `1px solid ${t.panelBorder}`, borderRadius: '13px', padding: '18px' }}>
+      <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: `${tint}1f`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', marginBottom: '14px' }}>{icon}</div>
+      <div style={{ fontSize: '27px', fontWeight: 700, color: t.text, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: '12px', color: t.textMuted, marginTop: '5px' }}>{label}</div>
+      {sub && <div style={{ fontSize: '10.5px', color: '#facc15', marginTop: '3px' }}>{sub}</div>}
     </motion.div>
   );
 }
-
-function StatCard({ label, value, color }) {
-  return (
-    <motion.div whileHover={{ y: -3 }} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px', padding: '16px', textAlign: 'center' }}>
-      <div style={{ fontSize: '26px', fontWeight: 700, color }}>{value}</div>
-      <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>{label}</div>
-    </motion.div>
-  );
-}
-
-const glassCard = { background: 'rgba(255, 255, 255, 0.05)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '16px', padding: '24px', marginBottom: '20px' };
-const inputStyle = { width: '100%', padding: '12px 16px', marginBottom: '14px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '10px', color: '#fff', fontSize: '15px', outline: 'none', boxSizing: 'border-box' };
-const primaryButton = (theme) => ({ padding: '11px 20px', background: theme ? `linear-gradient(135deg, ${theme.color}, #3b82f6)` : 'linear-gradient(135deg, #a855f7, #3b82f6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: 600, cursor: 'pointer' });
-const secondaryButton = { padding: '10px 18px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: '#fff', cursor: 'pointer', textDecoration: 'none', fontSize: '14px' };
-const docRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' };
-const statusBadge = (status) => ({ fontSize: '12px', padding: '4px 10px', borderRadius: '20px', background: status === 'ready' ? 'rgba(34,197,94,0.15)' : status === 'failed' ? 'rgba(239,68,68,0.15)' : 'rgba(234,179,8,0.15)', color: status === 'ready' ? '#4ade80' : status === 'failed' ? '#f87171' : '#facc15' });
-const radioLabel = { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', cursor: 'pointer' };
-const deleteBtn = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '15px' };
-
+const glassCard = (t) => ({ background: t.panelBg, border: `1px solid ${t.panelBorder}`, borderRadius: '14px', padding: '24px' });
+const inputStyle = (t) => ({ width: '100%', padding: '11px 14px', marginBottom: '14px', background: t.inputBg, border: `1px solid ${t.inputBorder}`, borderRadius: '9px', color: t.text, fontSize: '14px', outline: 'none', boxSizing: 'border-box' });
+const primaryButton = (theme) => ({ padding: '11px 20px', background: `linear-gradient(135deg, ${theme?.color || '#a855f7'}, #3b82f6)`, border: 'none', borderRadius: '9px', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', width: '100%' });
+const ghostButton = (t) => ({ background: 'transparent', border: `1px solid ${t.panelBorder}`, borderRadius: '9px', color: t.textMuted, cursor: 'pointer', padding: '8px 18px', fontSize: '13px' });
+const docRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 8px', borderRadius: '8px', margin: '0 -8px' };
+const statusBadge = (status) => ({ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', fontWeight: 500, background: status === 'ready' ? 'rgba(34,197,94,0.12)' : status === 'failed' ? 'rgba(239,68,68,0.12)' : 'rgba(234,179,8,0.12)', color: status === 'ready' ? '#4ade80' : status === 'failed' ? '#f87171' : '#facc15' });
+const deleteBtn = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '14px', opacity: 0.5 };
 export default Dashboard;

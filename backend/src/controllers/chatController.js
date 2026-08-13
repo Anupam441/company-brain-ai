@@ -26,8 +26,7 @@ exports.createConversation = async (req, res) => {
   }
 };
 
-// GET ALL MY CONVERSATIONS IN A WORKSPACE
-exports.getConversations = async (req, res) => {
+exports.getMyConversations = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
     const userId = req.user.id;
@@ -38,7 +37,8 @@ exports.getConversations = async (req, res) => {
     }
 
     const conversations = await Conversation.find({ workspace: workspaceId, user: userId })
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .limit(30);
 
     res.status(200).json({ conversations });
 
@@ -76,9 +76,8 @@ exports.sendMessage = async (req, res) => {
       content: question
     });
 
-    // Auto-title the conversation from the first message
     if (conversation.title === 'New Conversation') {
-      conversation.title = question.length > 50 ? question.slice(0, 50) + '...' : question;
+      conversation.title = question.length > 42 ? question.slice(0, 42) + '…' : question;
     }
     conversation.updatedAt = new Date();
     await conversation.save();
@@ -148,26 +147,36 @@ exports.getMessages = async (req, res) => {
   }
 };
 
-// DELETE A CONVERSATION
-exports.deleteConversation = async (req, res) => {
+// SUBMIT FEEDBACK ON A MESSAGE
+exports.submitFeedback = async (req, res) => {
   try {
-    const { conversationId } = req.params;
+    const { messageId } = req.params;
+    const { feedback } = req.body;
     const userId = req.user.id;
 
-    const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation not found' });
+    if (!['up', 'down', null].includes(feedback)) {
+      return res.status(400).json({ message: 'Invalid feedback value' });
     }
-    if (conversation.user.toString() !== userId) {
+
+    const message = await Message.findById(messageId).populate('conversation');
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    const membership = await WorkspaceMember.findOne({
+      user: userId,
+      workspace: message.conversation.workspace
+    });
+    if (!membership) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    await Message.deleteMany({ conversation: conversationId });
-    await Conversation.findByIdAndDelete(conversationId);
+    message.feedback = feedback;
+    await message.save();
 
-    res.status(200).json({ message: 'Conversation deleted' });
+    res.status(200).json({ message: 'Feedback recorded', feedback });
 
   } catch (error) {
-    res.status(500).json({ message: 'Failed to delete conversation', error: error.message });
+    res.status(500).json({ message: 'Failed to submit feedback', error: error.message });
   }
 };

@@ -1,4 +1,5 @@
 ﻿const mongoose = require('mongoose');
+
 const messageSchema = new mongoose.Schema({
   conversation: {
     type: mongoose.Schema.Types.ObjectId,
@@ -22,6 +23,12 @@ const messageSchema = new mongoose.Schema({
       }
     ],
     default: []
+  },
+  feedback: {
+    type: String,
+    enum: ['up', 'down', null],
+    default: null
   }
 }, { timestamps: true });
+
 module.exports = mongoose.model('Message', messageSchema);

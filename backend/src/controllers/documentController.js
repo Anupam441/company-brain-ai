@@ -1,7 +1,7 @@
 ﻿const Document = require('../models/Document');
+const DocumentChunk = require('../models/DocumentChunk');
 const WorkspaceMember = require('../models/WorkspaceMember');
 const processDocument = require('../services/processDocument');
-// UPLOAD DOCUMENT
 exports.uploadDocument = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
@@ -41,7 +41,6 @@ exports.uploadDocument = async (req, res) => {
     res.status(500).json({ message: 'Upload failed', error: error.message });
   }
 };
-// GET WORKSPACE DOCUMENTS (filtered by department access)
 exports.getDocuments = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
@@ -54,7 +53,6 @@ exports.getDocuments = async (req, res) => {
       return res.status(403).json({ message: 'You are not a member of this workspace' });
     }
     let query = { workspace: workspaceId };
-    // Admins see everything. Members only see public docs + docs allowed for their department.
     if (membership.role !== 'admin') {
       query = {
         workspace: workspaceId,
@@ -70,7 +68,45 @@ exports.getDocuments = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch documents', error: error.message });
   }
 };
-// DELETE DOCUMENT
+// GET DOCUMENT PREVIEW (content)
+exports.getDocumentPreview = async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const userId = req.user.id;
+    const document = await Document.findById(docId);
+    if (!document) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+    const membership = await WorkspaceMember.findOne({
+      user: userId,
+      workspace: document.workspace
+    });
+    if (!membership) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    // Non-admins can only preview documents they're allowed to see
+    if (membership.role !== 'admin' && document.visibility === 'restricted') {
+      if (!document.allowedDepartments.includes(membership.department)) {
+        return res.status(403).json({ message: 'You do not have access to this document' });
+      }
+    }
+    const chunks = await DocumentChunk.find({ document: docId }).sort({ chunkIndex: 1 }).limit(15);
+    const contentPreview = chunks.map((c) => c.text).join('\n\n');
+    res.status(200).json({
+      document: {
+        originalName: document.originalName,
+        status: document.status,
+        visibility: document.visibility,
+        allowedDepartments: document.allowedDepartments,
+        createdAt: document.createdAt
+      },
+      contentPreview: contentPreview || null,
+      truncated: chunks.length === 15
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch preview', error: error.message });
+  }
+};
 exports.deleteDocument = async (req, res) => {
   try {
     const { docId } = req.params;
@@ -87,6 +123,7 @@ exports.deleteDocument = async (req, res) => {
       return res.status(403).json({ message: 'Only admins can delete documents' });
     }
     await Document.findByIdAndDelete(docId);
+    await DocumentChunk.deleteMany({ document: docId });
     res.status(200).json({ message: 'Document deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Failed to delete document', error: error.message });
