@@ -4,7 +4,6 @@ const User = require('../models/User');
 function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
-// SIGNUP
 exports.signup = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -41,7 +40,6 @@ exports.signup = async (req, res) => {
     res.status(500).json({ message: 'Signup failed', error: error.message });
   }
 };
-// LOGIN (step 1: password check)
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -56,13 +54,11 @@ exports.login = async (req, res) => {
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
-    // If 2FA is enabled, send OTP instead of logging in directly
     if (user.twoFactorEnabled) {
       const otp = generateOtp();
       user.otpCode = otp;
-      user.otpExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+      user.otpExpires = new Date(Date.now() + 5 * 60 * 1000);
       await user.save();
-      // DEMO MODE: In production this would be emailed/texted, not returned in the response.
       return res.status(200).json({
         requiresOtp: true,
         message: 'Verification code sent',
@@ -90,7 +86,6 @@ exports.login = async (req, res) => {
     res.status(500).json({ message: 'Login failed', error: error.message });
   }
 };
-// VERIFY OTP (step 2)
 exports.verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -127,7 +122,6 @@ exports.verifyOtp = async (req, res) => {
     res.status(500).json({ message: 'Verification failed', error: error.message });
   }
 };
-// TOGGLE 2FA (from settings)
 exports.toggleTwoFactor = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -141,5 +135,53 @@ exports.toggleTwoFactor = async (req, res) => {
     res.status(200).json({ message: `Two-factor authentication ${enabled ? 'enabled' : 'disabled'}`, twoFactorEnabled: user.twoFactorEnabled });
   } catch (error) {
     res.status(500).json({ message: 'Failed to update two-factor setting', error: error.message });
+  }
+};
+// UPDATE PROFILE (name)
+exports.updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name } = req.body;
+    if (!name || name.trim().length < 1) {
+      return res.status(400).json({ message: 'Name is required' });
+    }
+    const user = await User.findById(userId);
+    user.name = name.trim();
+    await user.save();
+    res.status(200).json({
+      message: 'Profile updated',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        twoFactorEnabled: user.twoFactorEnabled
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update profile', error: error.message });
+  }
+};
+// CHANGE PASSWORD
+exports.changePassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Both current and new password are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters' });
+    }
+    const user = await User.findById(userId);
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Current password is incorrect' });
+    }
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    res.status(200).json({ message: 'Password changed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to change password', error: error.message });
   }
 };

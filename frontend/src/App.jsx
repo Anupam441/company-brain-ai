@@ -15,19 +15,30 @@ import Analytics from './pages/Analytics';
 import Activity from './pages/Activity';
 import Settings from './pages/Settings';
 import './index.css';
+
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
   return user ? children : <Navigate to="/login" />;
 }
+
 function SettingsWrapper() {
   const [workspace, setWorkspace] = useState(null);
-  useEffect(() => {
+
+  const loadWorkspace = () => {
     api.get('/workspaces').then((res) => {
       if (res.data.workspaces.length > 0) setWorkspace(res.data.workspaces[0]);
     });
-  }, []);
-  return <Settings workspace={workspace} />;
+  };
+
+  useEffect(() => { loadWorkspace(); }, []);
+
+  const handleRenamed = (newName) => {
+    setWorkspace((prev) => ({ ...prev, name: newName }));
+  };
+
+  return <Settings workspace={workspace} onWorkspaceRenamed={handleRenamed} />;
 }
+
 function AppRoutes() {
   return (
     <Routes>
@@ -44,6 +55,7 @@ function AppRoutes() {
     </Routes>
   );
 }
+
 function AppShell() {
   const location = useLocation();
   return (
@@ -54,6 +66,7 @@ function AppShell() {
     </>
   );
 }
+
 function App() {
   return (
     <AuthProvider>
@@ -67,4 +80,5 @@ function App() {
     </AuthProvider>
   );
 }
+
 export default App;

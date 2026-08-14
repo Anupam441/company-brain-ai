@@ -2,6 +2,8 @@
 const WorkspaceMember = require('../models/WorkspaceMember');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
+const Document = require('../models/Document');
+const DocumentChunk = require('../models/DocumentChunk');
 const logAction = require('../services/auditLog');
 exports.createWorkspace = async (req, res) => {
   try {
@@ -155,7 +157,6 @@ exports.updateMember = async (req, res) => {
     res.status(500).json({ message: 'Failed to update member', error: error.message });
   }
 };
-// GET AUDIT LOGS (admin only)
 exports.getAuditLogs = async (req, res) => {
   try {
     const { id: workspaceId } = req.params;
@@ -174,5 +175,58 @@ exports.getAuditLogs = async (req, res) => {
     res.status(200).json({ logs });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch audit logs', error: error.message });
+  }
+};
+// RENAME WORKSPACE (admin only)
+exports.renameWorkspace = async (req, res) => {
+  try {
+    const { id: workspaceId } = req.params;
+    const { name } = req.body;
+    const requesterId = req.user.id;
+    if (!name || name.trim().length < 1) {
+      return res.status(400).json({ message: 'Workspace name is required' });
+    }
+    const requesterMembership = await WorkspaceMember.findOne({
+      user: requesterId,
+      workspace: workspaceId
+    });
+    if (!requesterMembership || requesterMembership.role !== 'admin') {
+      return res.status(403).json({ message: 'Only workspace admins can rename the workspace' });
+    }
+    const workspace = await Workspace.findById(workspaceId);
+    const oldName = workspace.name;
+    workspace.name = name.trim();
+    await workspace.save();
+    logAction({
+      workspaceId, userId: requesterId, action: `renamed workspace (${oldName} → ${workspace.name})`,
+      targetType: 'workspace', targetName: workspace.name
+    });
+    res.status(200).json({ message: 'Workspace renamed', workspace });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to rename workspace', error: error.message });
+  }
+};
+// DELETE WORKSPACE (admin only, destructive)
+exports.deleteWorkspace = async (req, res) => {
+  try {
+    const { id: workspaceId } = req.params;
+    const requesterId = req.user.id;
+    const requesterMembership = await WorkspaceMember.findOne({
+      user: requesterId,
+      workspace: workspaceId
+    });
+    if (!requesterMembership || requesterMembership.role !== 'admin') {
+      return res.status(403).json({ message: 'Only workspace admins can delete the workspace' });
+    }
+    const docs = await Document.find({ workspace: workspaceId });
+    const docIds = docs.map((d) => d._id);
+    await DocumentChunk.deleteMany({ document: { $in: docIds } });
+    await Document.deleteMany({ workspace: workspaceId });
+    await WorkspaceMember.deleteMany({ workspace: workspaceId });
+    await AuditLog.deleteMany({ workspace: workspaceId });
+    await Workspace.findByIdAndDelete(workspaceId);
+    res.status(200).json({ message: 'Workspace deleted permanently' });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to delete workspace', error: error.message });
   }
 };
