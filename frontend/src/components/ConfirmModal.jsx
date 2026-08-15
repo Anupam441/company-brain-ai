@@ -1,6 +1,17 @@
 ﻿import { AnimatePresence, motion } from 'framer-motion';
+import { useEffect } from 'react';
 
 function ConfirmModal({ open, title, message, onConfirm, onCancel, danger = true }) {
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Enter') onConfirm();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [open, onCancel, onConfirm]);
+
   return (
     <AnimatePresence>
       {open && (
@@ -26,11 +37,11 @@ function ConfirmModal({ open, title, message, onConfirm, onCancel, danger = true
               <button onClick={onCancel} style={{
                 padding: '9px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.12)',
                 background: 'transparent', color: '#c8c8d8', fontSize: '13px', cursor: 'pointer'
-              }}>Cancel</button>
+              }}>Cancel <span style={{ opacity: 0.5, fontSize: '11px' }}>(Esc)</span></button>
               <button onClick={onConfirm} style={{
                 padding: '9px 16px', borderRadius: '8px', border: 'none',
                 background: danger ? '#dc2626' : '#a855f7', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer'
-              }}>{danger ? 'Delete' : 'Confirm'}</button>
+              }}>{danger ? 'Delete' : 'Confirm'} <span style={{ opacity: 0.7, fontSize: '11px' }}>(Enter)</span></button>
             </div>
           </motion.div>
         </motion.div>
