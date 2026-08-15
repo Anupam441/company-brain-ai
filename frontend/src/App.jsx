@@ -8,6 +8,7 @@ import ThemeOverlay from './components/ThemeOverlay';
 import api from './services/api';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import Chat from './pages/Chat';
 import Team from './pages/Team';
@@ -45,6 +46,7 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/login/:department" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
       <Route path="/team" element={<ProtectedRoute><Team /></ProtectedRoute>} />

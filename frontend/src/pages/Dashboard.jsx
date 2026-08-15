@@ -8,13 +8,17 @@ import { getDeptTheme } from '../utils/departmentTheme';
 import SidebarLayout from '../components/SidebarLayout';
 import ConfirmModal from '../components/ConfirmModal';
 import PreviewModal from '../components/PreviewModal';
+import EmptyState from '../components/EmptyState';
+
 const DEPARTMENTS = ['general', 'hr', 'engineering', 'sales', 'finance'];
+
 function fileIcon(name = '') {
   const ext = name.split('.').pop().toLowerCase();
   if (ext === 'pdf') return { icon: '📕' };
   if (ext === 'docx' || ext === 'doc') return { icon: '📘' };
   return { icon: '📄' };
 }
+
 function Dashboard() {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -35,7 +39,9 @@ function Dashboard() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
+
   useEffect(() => { loadWorkspace(); }, []);
+
   const loadWorkspace = async () => {
     try {
       const res = await api.get('/workspaces');
@@ -48,18 +54,21 @@ function Dashboard() {
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   };
+
   const loadDocuments = async (workspaceId) => {
     try {
       const res = await api.get(`/documents/${workspaceId}`);
       setDocuments(res.data.documents);
     } catch (err) { console.error(err); }
   };
+
   const loadMembers = async (workspaceId) => {
     try {
       const res = await api.get(`/workspaces/${workspaceId}/members`);
       setMembers(res.data.members);
     } catch (err) { console.error(err); }
   };
+
   const handleCreateWorkspace = async (e) => {
     e.preventDefault();
     try {
@@ -69,26 +78,32 @@ function Dashboard() {
       showToast('Workspace created successfully', 'success');
     } catch (err) { showToast(err.response?.data?.message || 'Failed to create workspace', 'error'); }
   };
+
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
     if (files.length) setPendingFiles(files);
   };
+
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files);
     if (files.length) setPendingFiles(files);
   };
+
   const removePendingFile = (idx) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== idx));
   };
+
   const toggleDept = (dept) => {
     setSelectedDepts((prev) => prev.includes(dept) ? prev.filter((d) => d !== dept) : [...prev, dept]);
   };
+
   const handleUploadConfirm = async () => {
     if (pendingFiles.length === 0 || !workspace) return;
     setUploading(true);
     setUploadProgress({ done: 0, total: pendingFiles.length });
+
     let successCount = 0;
     for (const file of pendingFiles) {
       const formData = new FormData();
@@ -105,6 +120,7 @@ function Dashboard() {
       }
       setUploadProgress((prev) => ({ ...prev, done: prev.done + 1 }));
     }
+
     loadDocuments(workspace.id);
     setPendingFiles([]);
     setVisibility('public');
@@ -112,6 +128,7 @@ function Dashboard() {
     setUploading(false);
     if (successCount > 0) showToast(`${successCount} document${successCount > 1 ? 's' : ''} uploaded — processing started`, 'success');
   };
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     try {
@@ -121,6 +138,7 @@ function Dashboard() {
     } catch (err) { showToast(err.response?.data?.message || 'Delete failed', 'error'); }
     finally { setDeleteTarget(null); }
   };
+
   const openPreview = async (docId) => {
     setPreviewOpen(true);
     setPreviewLoading(true);
@@ -133,14 +151,17 @@ function Dashboard() {
       setPreviewOpen(false);
     } finally { setPreviewLoading(false); }
   };
+
   useEffect(() => {
     if (!workspace) return;
     const interval = setInterval(() => loadDocuments(workspace.id), 5000);
     return () => clearInterval(interval);
   }, [workspace]);
+
   if (loading) {
     return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.textMuted }}>Loading...</div>;
   }
+
   if (!workspace) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
@@ -154,11 +175,13 @@ function Dashboard() {
       </div>
     );
   }
+
   const theme = getDeptTheme(workspace.department);
   const isAdmin = workspace.role === 'admin';
   const readyCount = documents.filter((d) => d.status === 'ready').length;
   const processingCount = documents.filter((d) => d.status === 'processing').length;
   const filteredDocs = documents.filter((d) => d.originalName.toLowerCase().includes(searchQuery.toLowerCase()));
+
   return (
     <SidebarLayout workspace={workspace} theme={theme}>
       <div style={{ padding: '36px 40px', maxWidth: '1100px' }}>
@@ -176,6 +199,7 @@ function Dashboard() {
             {isAdmin ? "Here's what's happening in your workspace." : 'Browse documents or ask Company Brain a question.'}
           </p>
         </motion.div>
+
         {isAdmin && (
           <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
             style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '24px' }}>
@@ -184,6 +208,7 @@ function Dashboard() {
             <StatCard icon="👥" label="Team members" value={members.length} tint="#60a5fa" t={t} />
           </motion.div>
         )}
+
         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} style={glassCard(t)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '12px', flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: '15px', color: t.text, fontWeight: 600 }}>Documents</h3>
@@ -192,6 +217,7 @@ function Dashboard() {
               style={{ padding: '7px 12px', borderRadius: '8px', border: `1px solid ${t.inputBorder}`, background: t.inputBg, color: t.text, fontSize: '12.5px', outline: 'none', width: '220px' }}
             />
           </div>
+
           {pendingFiles.length === 0 ? (
             <motion.label
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -225,6 +251,7 @@ function Dashboard() {
                   </div>
                 ))}
               </div>
+
               {isAdmin && (
                 <>
                   <p style={{ fontSize: '12px', color: t.textMuted, marginBottom: '8px' }}>Visibility (applies to all)</p>
@@ -252,6 +279,7 @@ function Dashboard() {
                   )}
                 </>
               )}
+
               {uploading && (
                 <div style={{ marginBottom: '12px' }}>
                   <div style={{ fontSize: '11.5px', color: t.textMuted, marginBottom: '4px' }}>Uploading {uploadProgress.done}/{uploadProgress.total}…</div>
@@ -260,6 +288,7 @@ function Dashboard() {
                   </div>
                 </div>
               )}
+
               <div style={{ display: 'flex', gap: '8px' }}>
                 <motion.button whileHover={{ scale: 1.02 }} onClick={handleUploadConfirm} disabled={uploading} style={{ ...primaryButton(theme), padding: '8px 18px', fontSize: '13px', width: 'auto' }}>
                   {uploading ? 'Uploading…' : `Upload ${pendingFiles.length} file${pendingFiles.length > 1 ? 's' : ''}`}
@@ -268,11 +297,14 @@ function Dashboard() {
               </div>
             </motion.div>
           )}
+
           <div>
             {filteredDocs.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '20px 0 4px', color: t.textFaint, fontSize: '13px' }}>
-                {documents.length === 0 ? 'No documents yet.' : 'No documents match your search.'}
-              </div>
+              <EmptyState
+                icon={documents.length === 0 ? '📂' : '🔍'}
+                title={documents.length === 0 ? 'No documents yet' : 'No matches found'}
+                subtitle={documents.length === 0 ? 'Upload your first document above to get started.' : 'No documents match your search.'}
+              />
             )}
             <AnimatePresence>
               {filteredDocs.map((doc) => {
@@ -301,6 +333,7 @@ function Dashboard() {
           </div>
         </motion.div>
       </div>
+
       <ConfirmModal
         open={!!deleteTarget}
         title="Delete this document?"
@@ -308,6 +341,7 @@ function Dashboard() {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
       <PreviewModal
         open={previewOpen}
         loading={previewLoading}
@@ -318,6 +352,7 @@ function Dashboard() {
     </SidebarLayout>
   );
 }
+
 function StatCard({ icon, label, value, tint, sub, t }) {
   return (
     <motion.div whileHover={{ y: -2 }} style={{ background: t.panelBg, border: `1px solid ${t.panelBorder}`, borderRadius: '13px', padding: '18px' }}>
@@ -328,6 +363,7 @@ function StatCard({ icon, label, value, tint, sub, t }) {
     </motion.div>
   );
 }
+
 const glassCard = (t) => ({ background: t.panelBg, border: `1px solid ${t.panelBorder}`, borderRadius: '14px', padding: '24px' });
 const inputStyle = (t) => ({ width: '100%', padding: '11px 14px', marginBottom: '14px', background: t.inputBg, border: `1px solid ${t.inputBorder}`, borderRadius: '9px', color: t.text, fontSize: '14px', outline: 'none', boxSizing: 'border-box' });
 const primaryButton = (theme) => ({ padding: '11px 20px', background: `linear-gradient(135deg, ${theme?.color || '#a855f7'}, #3b82f6)`, border: 'none', borderRadius: '9px', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', width: '100%' });
@@ -335,4 +371,5 @@ const ghostButton = (t) => ({ background: 'transparent', border: `1px solid ${t.
 const docRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 8px', borderRadius: '8px', margin: '0 -8px' };
 const statusBadge = (status) => ({ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', fontWeight: 500, background: status === 'ready' ? 'rgba(34,197,94,0.12)' : status === 'failed' ? 'rgba(239,68,68,0.12)' : 'rgba(234,179,8,0.12)', color: status === 'ready' ? '#4ade80' : status === 'failed' ? '#f87171' : '#facc15' });
 const deleteBtn = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '14px', opacity: 0.5 };
+
 export default Dashboard;
